@@ -1,0 +1,24 @@
+# Runs the whole app with: docker compose up --build
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:                # judge config, read from your .env (see .env.example)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - JUDGE_MODEL=${JUDGE_MODEL:-gpt-4o-mini}
+    volumes:
+      - ./backend:/code         # live code reload + keeps evalforge.db on your machine
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app         # live code reload
+      - /app/node_modules       # use the container's node_modules, not the host's
+    depends_on:
+      - backend
