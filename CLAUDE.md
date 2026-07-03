@@ -56,7 +56,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## 5. Response Type
 
-**The response must be less than 500 characters, unless elaborated explanations is asked.**
+**The response must be less than 100 characters, unless elaborated explanations is asked.**
 - Respond to the ask in simplest and shortest way possible. 
 - The response should also include technical jargons.
 - Response must also be easy to understand by any non-tech person.

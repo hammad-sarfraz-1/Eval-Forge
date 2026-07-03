@@ -3,4 +3,10 @@ uvicorn[standard]
 sqlalchemy
 python-multipart
 deepeval            # M1: LLM-as-a-judge (G-Eval), pulls in the OpenAI SDK
-# M2 will add: ragas, sentence-transformers
+ragas               # M2: RAG metrics
+sentence-transformers  # M2: local embeddings for Ragas (no vector DB)
+# ragas hard-imports langchain_community's (deprecated, now-removed) VertexAI
+# integration; pin the whole langchain family to the last pre-removal line.
+langchain>=0.3,<0.4
+langchain-core>=0.3,<0.4
+langchain-community>=0.3,<0.4

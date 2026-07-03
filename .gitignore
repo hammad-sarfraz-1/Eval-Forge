@@ -10,3 +10,7 @@ __pycache__/
 # Node / Next.js
 node_modules/
 .next/
+next-env.d.ts
+
+# Test datasets (downloaded, not versioned)
+data/
