@@ -1,4 +1,5 @@
 # schemas.py — the shape of the JSON the API sends back (Pydantic models).
+from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel
@@ -27,6 +28,17 @@ class RowSummary(BaseModel):
     response: Optional[str]
     avg_score: float
     passed: bool
+
+
+class RunListItem(BaseModel):
+    """One row in the run history list — no per-metric detail."""
+    id: int
+    dataset_id: int
+    overall_score: float
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class RunOut(BaseModel):

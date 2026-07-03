@@ -1,6 +1,8 @@
 // page.tsx — the one screen: pick a file, evaluate, see the report.
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import Report from "./Report";
 
 const API = "http://localhost:8000"; // the FastAPI backend
 
@@ -8,6 +10,11 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [run, setRun] = useState<any>(null);
   const [status, setStatus] = useState("");
+  const [pastRuns, setPastRuns] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch(`${API}/runs`).then(r => r.json()).then(setPastRuns).catch(() => {});
+  }, [run]);
 
   async function handleEvaluate() {
     if (!file) return;
@@ -40,51 +47,21 @@ export default function Home() {
       </button>
       {status && <p>{status}</p>}
 
-      {run && (
-        <section style={{ marginTop: 24 }}>
-          <h2>Overall score: {run.overall_score} / 100</h2>
-          {run.hallucination_rate !== null && (
-            <p>Hallucination rate: {run.hallucination_rate}% (rows failing faithfulness)</p>
-          )}
+      {run && <Report run={run} />}
 
-          <h3>Failed cases ({run.failed_cases.length})</h3>
-          {run.failed_cases.length === 0 ? <p>None.</p> : (
-            <ul>
-              {run.failed_cases.map((rs: any) => (
-                <li key={rs.row_id}>Row {rs.row_id}: "{rs.question}" — avg {rs.avg_score}</li>
-              ))}
-            </ul>
-          )}
-
-          <h3>Best examples</h3>
+      <section style={{ marginTop: 40 }}>
+        <h2>Past runs</h2>
+        {pastRuns.length === 0 ? <p>No runs yet.</p> : (
           <ul>
-            {run.best_examples.map((rs: any) => (
-              <li key={rs.row_id}>Row {rs.row_id}: "{rs.question}" — avg {rs.avg_score}</li>
+            {pastRuns.map((r: any) => (
+              <li key={r.id}>
+                <Link href={`/runs/${r.id}`}>Run #{r.id}</Link>
+                {" — "}{r.overall_score}/100 — dataset {r.dataset_id} — {new Date(r.created_at).toLocaleString()}
+              </li>
             ))}
           </ul>
-
-          <h3>Worst examples</h3>
-          <ul>
-            {run.worst_examples.map((rs: any) => (
-              <li key={rs.row_id}>Row {rs.row_id}: "{rs.question}" — avg {rs.avg_score}</li>
-            ))}
-          </ul>
-
-          <h3>All results</h3>
-          <table cellPadding={6} style={{ borderCollapse: "collapse", width: "100%" }} border={1}>
-            <thead>
-              <tr><th>Row</th><th>Metric</th><th>Score</th><th>Reason</th></tr>
-            </thead>
-            <tbody>
-              {run.results.map((r: any, i: number) => (
-                <tr key={i}>
-                  <td>{r.row_id}</td><td>{r.metric}</td><td>{r.score}</td><td>{r.reason}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
+        )}
+      </section>
     </main>
   );
 }

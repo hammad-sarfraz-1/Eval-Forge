@@ -129,6 +129,12 @@ def run_evaluation(dataset_id: int, db: Session = Depends(get_db)):
     return _build_report(db, run)
 
 
+@app.get("/runs", response_model=list[schemas.RunListItem])
+def list_runs(db: Session = Depends(get_db)):
+    """List past runs, most recent first (run history)."""
+    return db.query(models.Run).order_by(models.Run.created_at.desc()).all()
+
+
 @app.get("/runs/{run_id}", response_model=schemas.RunOut)
 def get_run(run_id: int, db: Session = Depends(get_db)):
     """Fetch a finished run (the shareable report)."""
