@@ -1,5 +1,5 @@
 # schemas.py — the shape of the JSON the API sends back (Pydantic models).
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -20,10 +20,23 @@ class ResultOut(BaseModel):
         from_attributes = True  # allow building this from an ORM object
 
 
+class RowSummary(BaseModel):
+    """One row's average score, for the failed/best/worst lists."""
+    row_id: int
+    question: Optional[str]
+    response: Optional[str]
+    avg_score: float
+    passed: bool
+
+
 class RunOut(BaseModel):
     id: int
     dataset_id: int
     overall_score: float
+    hallucination_rate: Optional[float]  # % of RAG rows failing faithfulness
+    failed_cases: List[RowSummary]
+    best_examples: List[RowSummary]
+    worst_examples: List[RowSummary]
     results: List[ResultOut]
 
     class Config:
