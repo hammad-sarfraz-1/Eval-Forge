@@ -56,6 +56,47 @@ def upload_dataset(file: UploadFile = File(...), db: Session = Depends(get_db)):
     return schemas.DatasetOut(id=dataset.id, name=dataset.name, row_count=len(rows))
 
 
+PASS_THRESHOLD = 0.5  # a row/metric below this counts as failed
+
+
+def _build_report(db: Session, run: models.Run) -> schemas.RunOut:
+    """Assemble the full report (hallucination rate, failed/best/worst) for a run."""
+    results = db.query(models.Result).filter(models.Result.run_id == run.id).all()
+
+    by_row = {}
+    for r in results:
+        by_row.setdefault(r.row_id, []).append(r)
+
+    row_summaries = []
+    faithfulness_scores = []
+    for row_id, row_results in by_row.items():
+        row = db.get(models.Row, row_id)
+        avg_score = round(sum(r.score for r in row_results) / len(row_results), 3)
+        row_summaries.append(schemas.RowSummary(
+            row_id=row_id, question=row.question, response=row.response,
+            avg_score=avg_score, passed=avg_score >= PASS_THRESHOLD,
+        ))
+        faithfulness_scores += [r.score for r in row_results if r.metric == "faithfulness"]
+
+    hallucination_rate = None
+    if faithfulness_scores:
+        failing = sum(1 for s in faithfulness_scores if s < PASS_THRESHOLD)
+        hallucination_rate = round(100 * failing / len(faithfulness_scores), 1)
+
+    ranked = sorted(row_summaries, key=lambda rs: rs.avg_score, reverse=True)
+
+    return schemas.RunOut(
+        id=run.id,
+        dataset_id=run.dataset_id,
+        overall_score=run.overall_score,
+        hallucination_rate=hallucination_rate,
+        failed_cases=[rs for rs in row_summaries if not rs.passed],
+        best_examples=ranked[:3],
+        worst_examples=ranked[-3:][::-1],
+        results=[schemas.ResultOut.model_validate(r) for r in results],
+    )
+
+
 @app.post("/datasets/{dataset_id}/run", response_model=schemas.RunOut)
 def run_evaluation(dataset_id: int, db: Session = Depends(get_db)):
     """Evaluate every row in a dataset, store the scores, return the report."""
@@ -80,7 +121,7 @@ def run_evaluation(dataset_id: int, db: Session = Depends(get_db)):
     run.overall_score = round(100 * sum(scores) / len(scores), 1)
     db.commit()
     db.refresh(run)
-    return run
+    return _build_report(db, run)
 
 
 @app.get("/runs/{run_id}", response_model=schemas.RunOut)
@@ -89,4 +130,4 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
     run = db.get(models.Run, run_id)
     if not run:
         raise HTTPException(404, "Run not found")
-    return run
+    return _build_report(db, run)
