@@ -71,10 +71,15 @@ def _build_report(db: Session, run: models.Run) -> schemas.RunOut:
     faithfulness_scores = []
     for row_id, row_results in by_row.items():
         row = db.get(models.Row, row_id)
-        avg_score = round(sum(r.score for r in row_results) / len(row_results), 3)
+        scores = [r.score for r in row_results]
+        avg_score = round(sum(scores) / len(scores), 3)
+        # A row only passes if EVERY metric clears the threshold — averaging
+        # would let a strong score (e.g. answer_relevancy) mask a real
+        # failure on another (e.g. faithfulness = a hallucination).
+        passed = all(s >= PASS_THRESHOLD for s in scores)
         row_summaries.append(schemas.RowSummary(
             row_id=row_id, question=row.question, response=row.response,
-            avg_score=avg_score, passed=avg_score >= PASS_THRESHOLD,
+            avg_score=avg_score, passed=passed,
         ))
         faithfulness_scores += [r.score for r in row_results if r.metric == "faithfulness"]
 
