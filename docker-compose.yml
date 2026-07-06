@@ -3,7 +3,8 @@ services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
+      target: backend
     ports:
       - "8000:8000"
     environment:                # judge config, read from your .env (see .env.example)
@@ -14,7 +15,10 @@ services:
       - ./backend:/code         # live code reload + keeps evalforge.db on your machine
 
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
     ports:
       - "3000:3000"
     volumes:
