@@ -29,8 +29,11 @@ export default function RunPage() {
 
   return (
     <main>
-      <h1>EvalForge — Run #{params.id}</h1>
-      {error && <p>{error}</p>}
+      <div className="hero">
+        <div className="badge"><span className="dot"></span> Shared report</div>
+        <h1>Run <span className="accent">#{params.id}</span></h1>
+      </div>
+      {error && <div className="card" style={{ color: "var(--bad)" }}>{error}</div>}
       {run && <Report run={run} />}
     </main>
   );

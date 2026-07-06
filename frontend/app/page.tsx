@@ -1,4 +1,4 @@
-// page.tsx — the one screen: pick a file, evaluate, see the report.
+// page.tsx — the one screen: pick a file, evaluate, see the report + history.
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -10,6 +10,7 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [run, setRun] = useState<any>(null);
   const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
   const [pastRuns, setPastRuns] = useState<any[]>([]);
 
   useEffect(() => {
@@ -21,59 +22,80 @@ export default function Home() {
     const r = await fetch(`${API}/runs/${id}`).then(res => res.json());
     setRun(r);
     if (r.status === "running") setTimeout(() => poll(id), 2000);
-    else setStatus("");
+    else { setStatus(""); setBusy(false); }
   }
 
   async function handleEvaluate() {
     if (!file) return;
     try {
-      // 1) upload the dataset
+      setBusy(true);
       setStatus("Uploading…");
       setRun(null);
       const form = new FormData();
       form.append("file", file);
       const res = await fetch(`${API}/datasets/upload`, { method: "POST", body: form });
       const ds = await res.json();
-      if (!res.ok) {  // validation rejected the file — show the reason
-        setStatus(ds.detail ?? "Upload failed.");
-        return;
-      }
+      if (!res.ok) { setStatus(ds.detail ?? "Upload failed."); setBusy(false); return; }
 
-      // 2) kick off the evaluation (returns immediately, status "running")
       setStatus("Evaluating…");
       const started = await fetch(`${API}/datasets/${ds.id}/run`, { method: "POST" }).then(r => r.json());
       poll(started.id);
     } catch {
       setStatus("Something went wrong — is the backend running on :8000?");
+      setBusy(false);
     }
   }
 
   return (
     <main>
-      <h1>EvalForge</h1>
-      <p>Upload a CSV/JSON dataset (each row needs a <code>response</code>).</p>
+      <div className="hero">
+        <div className="badge"><span className="dot"></span> LLM-as-a-Judge</div>
+        <h1>Eval<span className="accent">Forge</span></h1>
+        <p className="subtitle">
+          Upload a dataset of model responses, judge it with an LLM (DeepEval + Ragas),
+          and get a shareable scored report — correctness, faithfulness, hallucinations and more.
+        </p>
+      </div>
 
-      <input type="file" accept=".csv,.json" onChange={e => setFile(e.target.files?.[0] ?? null)} />
-      <button onClick={handleEvaluate} disabled={!file} style={{ marginLeft: 8 }}>
-        Evaluate
-      </button>
-      {status && <p>{status}</p>}
+      <div className="card">
+        <div className="upload-row">
+          <label className="btn btn-secondary">
+            Choose file
+            <input type="file" accept=".csv,.json" hidden
+              onChange={e => setFile(e.target.files?.[0] ?? null)} />
+          </label>
+          <span className="file-name">{file ? file.name : "No file selected (CSV/JSON, each row needs a response)"}</span>
+          <button className="btn btn-primary" onClick={handleEvaluate} disabled={!file || busy} style={{ marginLeft: "auto" }}>
+            {busy ? "Running…" : "Evaluate"}
+          </button>
+        </div>
+        {status && (
+          <div className="status-line">
+            {busy && <span className="spinner" />} {status}
+          </div>
+        )}
+      </div>
 
       {run && <Report run={run} />}
 
-      <section style={{ marginTop: 40 }}>
-        <h2>Past runs</h2>
-        {pastRuns.length === 0 ? <p>No runs yet.</p> : (
-          <ul>
-            {pastRuns.map((r: any) => (
-              <li key={r.id}>
-                <Link href={`/runs/${r.id}`}>Run #{r.id}</Link>
-                {" — "}{r.status === "done" ? `${r.overall_score}/100` : r.status} — dataset {r.dataset_id} — {new Date(r.created_at).toLocaleString()}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <h2 className="section-title">Run history</h2>
+      {pastRuns.length === 0 ? (
+        <p style={{ color: "var(--muted)" }}>No runs yet.</p>
+      ) : (
+        <ul className="history">
+          {pastRuns.map((r: any) => (
+            <li key={r.id}>
+              <span>
+                <Link href={`/runs/${r.id}`} className="run-id">Run #{r.id}</Link>
+                <span className="meta"> · dataset {r.dataset_id} · {new Date(r.created_at).toLocaleString()}</span>
+              </span>
+              {r.status === "done"
+                ? <span className="pill done">{r.overall_score}/100</span>
+                : <span className={`pill ${r.status}`}>{r.status}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </main>
   );
 }
