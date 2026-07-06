@@ -8,11 +8,13 @@
 # JUDGE_MODEL. See .env.example.
 
 import os
+import threading
 
 # Opt out of DeepEval's anonymous telemetry — this is a self-hosted tool.
 # Must be set before importing deepeval.
 os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
+import openai
 from deepeval.metrics import GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 from openai import AsyncOpenAI
@@ -21,6 +23,22 @@ from ragas.llms import llm_factory
 from ragas.metrics.collections import (
     AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness,
 )
+from tenacity import (RetryError, retry, retry_if_exception_type,
+                      stop_after_attempt, wait_random_exponential)
+
+# Provider errors worth retrying with backoff: rate limits (429) and 5xx.
+# DeepEval/Ragas wrap their own exhausted retries in tenacity.RetryError.
+_RETRY_EXC = (RetryError, openai.RateLimitError, openai.APIError,
+              openai.APIConnectionError, openai.APITimeoutError)
+
+
+@retry(reraise=True, retry=retry_if_exception_type(_RETRY_EXC),
+       wait=wait_random_exponential(multiplier=1, max=60),
+       stop=stop_after_attempt(8))
+def _with_backoff(fn, *args, **kwargs):
+    """Call a judge/metric fn, retrying with jittered backoff on 429/5xx.
+    Jitter decorrelates parallel workers so they don't retry in lockstep."""
+    return fn(*args, **kwargs)
 
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "gpt-4o-mini")
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -48,25 +66,24 @@ _METRIC_DEFS = [
 
 METRICS = [name for name, _, _ in _METRIC_DEFS]
 
-# Built on first use so the app can start (and serve uploads) with no key;
-# the key is only required when you actually run an evaluation.
-_metrics = None
+
+def _require_key():
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError(
+            "No judge API key. Set OPENAI_API_KEY (and JUDGE_MODEL) in .env "
+            "— see .env.example. EvalForge is bring-your-own-key."
+        )
 
 
-def _get_metrics():
-    global _metrics
-    if _metrics is None:
-        if not os.getenv("OPENAI_API_KEY"):
-            raise RuntimeError(
-                "No judge API key. Set OPENAI_API_KEY (and JUDGE_MODEL) in .env "
-                "— see .env.example. EvalForge is bring-your-own-key."
-            )
-        _metrics = [
-            GEval(name=name, criteria=criteria,
-                  evaluation_params=params, model=JUDGE_MODEL)
-            for name, criteria, params in _METRIC_DEFS
-        ]
-    return _metrics
+def _build_llm_metrics():
+    # Fresh GEval objects per call — GEval stores score/reason on itself, so
+    # sharing instances across parallel rows would corrupt results.
+    _require_key()
+    return [
+        GEval(name=name, criteria=criteria,
+              evaluation_params=params, model=JUDGE_MODEL)
+        for name, criteria, params in _METRIC_DEFS
+    ]
 
 
 def _evaluate_llm_row(row):
@@ -76,36 +93,38 @@ def _evaluate_llm_row(row):
         expected_output=row.expected_answer or "",
     )
     out = []
-    for (name, _, _), metric in zip(_METRIC_DEFS, _get_metrics()):
-        metric.measure(test_case)
+    for (name, _, _), metric in zip(_METRIC_DEFS, _build_llm_metrics()):
+        _with_backoff(metric.measure, test_case)
         out.append((name, round(metric.score, 3), metric.reason))
     return out
 
 
-# Built on first use, same reasoning as _get_metrics() above.
+# Built on first use and shared across rows. Safe to share: the embeddings
+# model and LLM client are read-only for inference, and each .score() call
+# returns its result rather than mutating the metric. A lock guards the lazy
+# build so parallel rows don't race to construct it (or reload the model).
 _rag_metrics = None
+_rag_lock = threading.Lock()
 
 
 def _get_rag_metrics():
     global _rag_metrics
     if _rag_metrics is None:
-        if not os.getenv("OPENAI_API_KEY"):
-            raise RuntimeError(
-                "No judge API key. Set OPENAI_API_KEY (and JUDGE_MODEL) in .env "
-                "— see .env.example. EvalForge is bring-your-own-key."
-            )
-        client = AsyncOpenAI(
-            base_url=os.getenv("OPENAI_BASE_URL") or None,
-            api_key=os.getenv("OPENAI_API_KEY"),
-        )
-        llm = llm_factory(JUDGE_MODEL, provider="openai", client=client)
-        embeddings = HuggingFaceEmbeddings(model=EMBEDDING_MODEL)
-        _rag_metrics = {
-            "faithfulness": Faithfulness(llm=llm),
-            "context_recall": ContextRecall(llm=llm),
-            "context_precision": ContextPrecision(llm=llm),
-            "answer_relevancy": AnswerRelevancy(llm=llm, embeddings=embeddings),
-        }
+        with _rag_lock:
+            if _rag_metrics is None:
+                _require_key()
+                client = AsyncOpenAI(
+                    base_url=os.getenv("OPENAI_BASE_URL") or None,
+                    api_key=os.getenv("OPENAI_API_KEY"),
+                )
+                llm = llm_factory(JUDGE_MODEL, provider="openai", client=client)
+                embeddings = HuggingFaceEmbeddings(model=EMBEDDING_MODEL)
+                _rag_metrics = {
+                    "faithfulness": Faithfulness(llm=llm),
+                    "context_recall": ContextRecall(llm=llm),
+                    "context_precision": ContextPrecision(llm=llm),
+                    "answer_relevancy": AnswerRelevancy(llm=llm, embeddings=embeddings),
+                }
     return _rag_metrics
 
 
@@ -125,7 +144,7 @@ def _evaluate_rag_row(row):
     }
     out = []
     for name, metric in _get_rag_metrics().items():
-        result = metric.score(**kwargs_by_metric[name])
+        result = _with_backoff(metric.score, **kwargs_by_metric[name])
         # Most Ragas metrics are computed numerically and don't produce a
         # natural-language reason (unlike G-Eval) — say so plainly.
         reason = result.reason or f"Computed via Ragas {name} (no explanation for this metric)."
