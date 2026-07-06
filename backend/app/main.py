@@ -2,13 +2,22 @@
 import csv
 import io
 import json
+from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
+from fastapi import (BackgroundTasks, Depends, FastAPI, File, HTTPException,
+                     UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from . import models, schemas, evaluator
-from .database import engine, get_db, Base
+from .database import engine, get_db, Base, SessionLocal
+
+# Upload limits (MVP).
+MAX_BYTES = 5 * 1024 * 1024
+MAX_ROWS = 1000
+# Judge calls run concurrently but bounded, so a big dataset doesn't burst the
+# provider's rate limit all at once.
+CONCURRENCY = 4
 
 # Create the SQLite tables on startup (no migration tool needed for a basic app).
 Base.metadata.create_all(bind=engine)
@@ -37,8 +46,18 @@ def _parse_upload(filename: str, raw: bytes) -> list[dict]:
 
 @app.post("/datasets/upload", response_model=schemas.DatasetOut)
 def upload_dataset(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Upload a dataset. Each row should have a 'response' to be judged."""
-    rows = _parse_upload(file.filename, file.file.read())
+    """Upload a dataset. Each row must have a 'response' to be judged."""
+    raw = file.file.read()
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(400, f"File too large — limit is {MAX_BYTES // (1024*1024)} MB.")
+
+    rows = _parse_upload(file.filename, raw)
+    if not rows:
+        raise HTTPException(400, "No rows found in the file.")
+    if len(rows) > MAX_ROWS:
+        raise HTTPException(400, f"Too many rows ({len(rows)}) — limit is {MAX_ROWS}.")
+    if any(not str(r.get("response") or "").strip() for r in rows):
+        raise HTTPException(400, "Every row must have a non-empty 'response' to judge.")
 
     dataset = models.Dataset(name=file.filename)
     db.add(dataset)
@@ -94,6 +113,8 @@ def _build_report(db: Session, run: models.Run) -> schemas.RunOut:
         id=run.id,
         dataset_id=run.dataset_id,
         overall_score=run.overall_score,
+        status=run.status,
+        error=run.error,
         hallucination_rate=hallucination_rate,
         failed_cases=[rs for rs in row_summaries if not rs.passed],
         best_examples=ranked[:3],
@@ -102,30 +123,56 @@ def _build_report(db: Session, run: models.Run) -> schemas.RunOut:
     )
 
 
+def _evaluate_run(run_id: int, dataset_id: int):
+    """Background worker: judge every row (bounded concurrency + retry/backoff),
+    store results, and mark the run done — or error with a clear message."""
+    db = SessionLocal()
+    try:
+        rows = db.query(models.Row).filter(models.Row.dataset_id == dataset_id).all()
+        # Judge calls run in the pool (network-bound); DB writes stay on this
+        # thread to avoid SQLite write contention.
+        with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+            per_row = list(pool.map(evaluator.evaluate_row, rows))
+
+        scores = []
+        for row, results in zip(rows, per_row):
+            for metric, score, reason in results:
+                scores.append(score)
+                db.add(models.Result(
+                    run_id=run_id, row_id=row.id,
+                    metric=metric, score=score, reason=reason,
+                ))
+
+        run = db.get(models.Run, run_id)
+        run.overall_score = round(100 * sum(scores) / len(scores), 1) if scores else 0.0
+        run.status = "done"
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        run = db.get(models.Run, run_id)
+        if run:
+            run.status = "error"
+            run.error = f"{type(e).__name__}: {e}"[:500]
+            db.commit()
+    finally:
+        db.close()
+
+
 @app.post("/datasets/{dataset_id}/run", response_model=schemas.RunOut)
-def run_evaluation(dataset_id: int, db: Session = Depends(get_db)):
-    """Evaluate every row in a dataset, store the scores, return the report."""
+def run_evaluation(dataset_id: int, background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_db)):
+    """Kick off an evaluation in the background; returns the run (status=running).
+    Poll GET /runs/{id} until status is 'done' or 'error'."""
     rows = db.query(models.Row).filter(models.Row.dataset_id == dataset_id).all()
     if not rows:
         raise HTTPException(404, "Dataset not found or empty")
 
-    run = models.Run(dataset_id=dataset_id, overall_score=0.0)
+    run = models.Run(dataset_id=dataset_id, overall_score=0.0, status="running")
     db.add(run)
-    db.flush()  # assigns run.id
-
-    scores = []
-    for row in rows:
-        for metric, score, reason in evaluator.evaluate_row(row):
-            scores.append(score)
-            db.add(models.Result(
-                run_id=run.id, row_id=row.id,
-                metric=metric, score=score, reason=reason,
-            ))
-
-    # Overall = average of all metric scores, scaled to 0–100.
-    run.overall_score = round(100 * sum(scores) / len(scores), 1)
     db.commit()
     db.refresh(run)
+
+    background_tasks.add_task(_evaluate_run, run.id, dataset_id)
     return _build_report(db, run)
 
 

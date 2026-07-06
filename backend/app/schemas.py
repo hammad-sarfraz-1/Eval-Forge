@@ -35,6 +35,7 @@ class RunListItem(BaseModel):
     id: int
     dataset_id: int
     overall_score: float
+    status: str
     created_at: datetime
 
     class Config:
@@ -45,6 +46,8 @@ class RunOut(BaseModel):
     id: int
     dataset_id: int
     overall_score: float
+    status: str                     # running | done | error
+    error: Optional[str] = None
     hallucination_rate: Optional[float]  # % of RAG rows failing faithfulness
     failed_cases: List[RowSummary]
     best_examples: List[RowSummary]

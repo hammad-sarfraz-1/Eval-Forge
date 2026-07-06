@@ -34,6 +34,8 @@ class Run(Base):
     id = Column(Integer, primary_key=True)
     dataset_id = Column(Integer, ForeignKey("datasets.id"))
     overall_score = Column(Float)  # 0–100
+    status = Column(String, default="running")  # running | done | error
+    error = Column(Text, nullable=True)         # message when status == error
     created_at = Column(DateTime, default=datetime.utcnow)
     results = relationship("Result", back_populates="run")
 
