@@ -7,8 +7,10 @@
 # OPENAI_BASE_URL for any OpenAI-compatible provider, e.g. Groq) and
 # JUDGE_MODEL. See .env.example.
 
+import logging
 import os
 import threading
+import time
 
 # Opt out of DeepEval's anonymous telemetry — this is a self-hosted tool.
 # Must be set before importing deepeval.
@@ -23,8 +25,12 @@ from ragas.llms import llm_factory
 from ragas.metrics.collections import (
     AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness,
 )
-from tenacity import (RetryError, retry, retry_if_exception_type,
-                      stop_after_attempt, wait_random_exponential)
+from tenacity import (RetryError, before_sleep_log, retry,
+                      retry_if_exception_type, stop_after_attempt,
+                      wait_random_exponential)
+
+# Shared pipeline logger; main.py attaches a per-run file handler.
+log = logging.getLogger("evalforge")
 
 # Provider errors worth retrying with backoff: rate limits (429) and 5xx.
 # DeepEval/Ragas wrap their own exhausted retries in tenacity.RetryError.
@@ -34,7 +40,8 @@ _RETRY_EXC = (RetryError, openai.RateLimitError, openai.APIError,
 
 @retry(reraise=True, retry=retry_if_exception_type(_RETRY_EXC),
        wait=wait_random_exponential(multiplier=1, max=60),
-       stop=stop_after_attempt(8))
+       stop=stop_after_attempt(8),
+       before_sleep=before_sleep_log(log, logging.WARNING))
 def _with_backoff(fn, *args, **kwargs):
     """Call a judge/metric fn, retrying with jittered backoff on 429/5xx.
     Jitter decorrelates parallel workers so they don't retry in lockstep."""
@@ -154,6 +161,11 @@ def _evaluate_rag_row(row):
 
 def evaluate_row(row):
     """Score every metric for one row -> list of (metric, score, reason)."""
-    if row.context:
-        return _evaluate_rag_row(row)
-    return _evaluate_llm_row(row)
+    path = "RAG" if row.context else "LLM"
+    log.info("Row %s: scoring via %s judge", row.id, path)
+    start = time.time()
+    results = _evaluate_rag_row(row) if row.context else _evaluate_llm_row(row)
+    for name, score, reason in results:
+        log.info("Row %s %s=%.3f — %s", row.id, name, score, reason)
+    log.info("Row %s scored in %.2fs", row.id, time.time() - start)
+    return results
