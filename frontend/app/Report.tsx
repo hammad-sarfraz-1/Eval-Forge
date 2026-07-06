@@ -1,6 +1,10 @@
 // Report.tsx — renders a run's report. Shared by the home page (fresh eval)
 // and /runs/[id] (a shareable link to a past run).
 export default function Report({ run }: { run: any }) {
+  if (run.status === "error")
+    return <p style={{ color: "crimson" }}>Evaluation failed: {run.error}</p>;
+  if (run.status === "running")
+    return <p>⏳ Evaluating… scores appear here when the run finishes.</p>;
   return (
     <section style={{ marginTop: 24 }}>
       <h2>Overall score: {run.overall_score} / 100</h2>
