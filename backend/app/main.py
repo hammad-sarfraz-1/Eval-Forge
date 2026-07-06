@@ -2,6 +2,9 @@
 import csv
 import io
 import json
+import logging
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import (BackgroundTasks, Depends, FastAPI, File, HTTPException,
@@ -18,6 +21,19 @@ MAX_ROWS = 1000
 # Judge calls run concurrently but bounded, so a big dataset doesn't burst the
 # provider's rate limit all at once.
 CONCURRENCY = 4
+# One log file per run captures the whole pipeline (path, scores, retries, timings).
+LOG_DIR = "logs"
+
+
+def _setup_run_log(run_id: int) -> logging.FileHandler:
+    """Attach a per-run file handler to the shared 'evalforge' logger."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    logger = logging.getLogger("evalforge")
+    logger.setLevel(logging.INFO)
+    handler = logging.FileHandler(os.path.join(LOG_DIR, f"run_{run_id}.log"))
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger.addHandler(handler)
+    return handler
 
 # Create the SQLite tables on startup (no migration tool needed for a basic app).
 Base.metadata.create_all(bind=engine)
@@ -126,9 +142,14 @@ def _build_report(db: Session, run: models.Run) -> schemas.RunOut:
 def _evaluate_run(run_id: int, dataset_id: int):
     """Background worker: judge every row (bounded concurrency + retry/backoff),
     store results, and mark the run done — or error with a clear message."""
+    log = logging.getLogger("evalforge")
+    handler = _setup_run_log(run_id)
     db = SessionLocal()
+    start = time.time()
     try:
         rows = db.query(models.Row).filter(models.Row.dataset_id == dataset_id).all()
+        log.info("Run %s started — dataset %s, %d rows, concurrency=%d",
+                 run_id, dataset_id, len(rows), CONCURRENCY)
         # Judge calls run in the pool (network-bound); DB writes stay on this
         # thread to avoid SQLite write contention.
         with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
@@ -147,6 +168,8 @@ def _evaluate_run(run_id: int, dataset_id: int):
         run.overall_score = round(100 * sum(scores) / len(scores), 1) if scores else 0.0
         run.status = "done"
         db.commit()
+        log.info("Run %s done — overall_score=%.1f/100, %d metric scores, %.2fs",
+                 run_id, run.overall_score, len(scores), time.time() - start)
     except Exception as e:
         db.rollback()
         run = db.get(models.Run, run_id)
@@ -154,8 +177,11 @@ def _evaluate_run(run_id: int, dataset_id: int):
             run.status = "error"
             run.error = f"{type(e).__name__}: {e}"[:500]
             db.commit()
+        log.exception("Run %s error — %s: %s", run_id, type(e).__name__, e)
     finally:
         db.close()
+        logging.getLogger("evalforge").removeHandler(handler)
+        handler.close()
 
 
 @app.post("/datasets/{dataset_id}/run", response_model=schemas.RunOut)
