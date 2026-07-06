@@ -16,21 +16,33 @@ export default function Home() {
     fetch(`${API}/runs`).then(r => r.json()).then(setPastRuns).catch(() => {});
   }, [run]);
 
+  // Poll a run until it stops being "running", updating the UI each tick.
+  async function poll(id: number) {
+    const r = await fetch(`${API}/runs/${id}`).then(res => res.json());
+    setRun(r);
+    if (r.status === "running") setTimeout(() => poll(id), 2000);
+    else setStatus("");
+  }
+
   async function handleEvaluate() {
     if (!file) return;
     try {
       // 1) upload the dataset
       setStatus("Uploading…");
+      setRun(null);
       const form = new FormData();
       form.append("file", file);
-      const ds = await fetch(`${API}/datasets/upload`, { method: "POST", body: form }).then(r => r.json());
+      const res = await fetch(`${API}/datasets/upload`, { method: "POST", body: form });
+      const ds = await res.json();
+      if (!res.ok) {  // validation rejected the file — show the reason
+        setStatus(ds.detail ?? "Upload failed.");
+        return;
+      }
 
-      // 2) run the evaluation on it
+      // 2) kick off the evaluation (returns immediately, status "running")
       setStatus("Evaluating…");
-      const result = await fetch(`${API}/datasets/${ds.id}/run`, { method: "POST" }).then(r => r.json());
-
-      setRun(result);
-      setStatus("");
+      const started = await fetch(`${API}/datasets/${ds.id}/run`, { method: "POST" }).then(r => r.json());
+      poll(started.id);
     } catch {
       setStatus("Something went wrong — is the backend running on :8000?");
     }
@@ -56,7 +68,7 @@ export default function Home() {
             {pastRuns.map((r: any) => (
               <li key={r.id}>
                 <Link href={`/runs/${r.id}`}>Run #{r.id}</Link>
-                {" — "}{r.overall_score}/100 — dataset {r.dataset_id} — {new Date(r.created_at).toLocaleString()}
+                {" — "}{r.status === "done" ? `${r.overall_score}/100` : r.status} — dataset {r.dataset_id} — {new Date(r.created_at).toLocaleString()}
               </li>
             ))}
           </ul>

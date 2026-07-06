@@ -12,10 +12,19 @@ export default function RunPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`${API}/runs/${params.id}`)
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then(setRun)
-      .catch(() => setError("Run not found — is the backend running on :8000?"));
+    let stop = false;
+    const load = () => {
+      fetch(`${API}/runs/${params.id}`)
+        .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+        .then(data => {
+          if (stop) return;
+          setRun(data);
+          if (data.status === "running") setTimeout(load, 2000);  // keep polling
+        })
+        .catch(() => setError("Run not found — is the backend running on :8000?"));
+    };
+    load();
+    return () => { stop = true; };
   }, [params.id]);
 
   return (
