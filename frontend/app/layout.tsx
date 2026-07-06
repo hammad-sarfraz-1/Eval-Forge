@@ -25,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </a>
             <div className="nav-links">
               <a href="/">New Eval</a>
-              <a href="http://localhost:8000/docs" target="_blank" rel="noreferrer">API Docs</a>
+              <a href="/architecture">Architecture</a>
             </div>
           </div>
         </nav>
