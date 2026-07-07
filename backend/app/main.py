@@ -20,7 +20,7 @@ MAX_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 1000
 # Judge calls run concurrently but bounded, so a big dataset doesn't burst the
 # provider's rate limit all at once.
-CONCURRENCY = 4
+CONCURRENCY = 1
 # One log file per run captures the whole pipeline (path, scores, retries, timings).
 LOG_DIR = "logs"
 
@@ -125,13 +125,16 @@ def _build_report(db: Session, run: models.Run) -> schemas.RunOut:
 
     ranked = sorted(row_summaries, key=lambda rs: rs.avg_score, reverse=True)
 
+    dataset = db.get(models.Dataset, run.dataset_id)
     return schemas.RunOut(
         id=run.id,
         dataset_id=run.dataset_id,
+        dataset_name=dataset.name if dataset else "",
         overall_score=run.overall_score,
         status=run.status,
         error=run.error,
         hallucination_rate=hallucination_rate,
+        rows=sorted(row_summaries, key=lambda rs: rs.row_id),
         failed_cases=[rs for rs in row_summaries if not rs.passed],
         best_examples=ranked[:3],
         worst_examples=ranked[-3:][::-1],
@@ -205,7 +208,17 @@ def run_evaluation(dataset_id: int, background_tasks: BackgroundTasks,
 @app.get("/runs", response_model=list[schemas.RunListItem])
 def list_runs(db: Session = Depends(get_db)):
     """List past runs, most recent first (run history)."""
-    return db.query(models.Run).order_by(models.Run.created_at.desc()).all()
+    runs = db.query(models.Run).order_by(models.Run.created_at.desc()).all()
+    names = dict(db.query(models.Dataset.id, models.Dataset.name).all())
+    return [
+        schemas.RunListItem(
+            id=r.id, dataset_id=r.dataset_id,
+            dataset_name=names.get(r.dataset_id, ""),
+            overall_score=r.overall_score, status=r.status,
+            created_at=r.created_at,
+        )
+        for r in runs
+    ]
 
 
 @app.get("/runs/{run_id}", response_model=schemas.RunOut)
@@ -214,4 +227,25 @@ def get_run(run_id: int, db: Session = Depends(get_db)):
     run = db.get(models.Run, run_id)
     if not run:
         raise HTTPException(404, "Run not found")
+    return _build_report(db, run)
+
+
+@app.post("/runs/{run_id}/retry", response_model=schemas.RunOut)
+def retry_run(run_id: int, background_tasks: BackgroundTasks,
+              db: Session = Depends(get_db)):
+    """Re-run the whole evaluation on the same run: clear its results, reset to
+    'running', and re-judge every row in the background. Keeps the same run id
+    (and shareable link). Poll GET /runs/{id} until done. Used by the run's
+    'Retry' button."""
+    run = db.get(models.Run, run_id)
+    if not run:
+        raise HTTPException(404, "Run not found")
+
+    db.query(models.Result).filter(models.Result.run_id == run_id).delete()
+    run.status = "running"
+    run.error = None
+    run.overall_score = 0.0
+    db.commit()
+
+    background_tasks.add_task(_evaluate_run, run.id, run.dataset_id)
     return _build_report(db, run)

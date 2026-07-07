@@ -143,6 +143,32 @@ main {
 .ex-list li { font-size: 13.5px; color: var(--text); line-height: 1.5; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
 .ex-list li .rid { font-weight: 600; color: var(--muted); }
 .ex-list li .sc { float: right; font-weight: 600; }
+.retry-btn { float: right; margin-left: 10px; font-size: 12px; font-weight: 600; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 8px; padding: 3px 10px; cursor: pointer; }
+.retry-btn:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.retry-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Grouped per-row results */
+.row-block { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--bg); }
+.row-block summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 10px 12px; font-size: 13.5px; }
+.row-block summary::-webkit-details-marker { display: none; }
+.row-block summary::before { content: "▸"; color: var(--muted); font-size: 11px; transition: transform .15s; }
+.row-block[open] summary::before { transform: rotate(90deg); }
+.row-block summary .rid { font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.row-block summary .q { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.row-block summary .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+.chip { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 6px; white-space: nowrap; }
+.chip.ok { background: rgba(79,157,105,0.14); color: var(--ok); }
+.chip.bad { background: rgba(196,85,59,0.14); color: var(--bad); }
+.verdict { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+.verdict.ok { color: var(--ok); }
+.verdict.bad { color: var(--bad); }
+.row-block .reasons { padding: 4px 12px 12px 30px; border-top: 1px solid var(--border); }
+.reason-row { padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.reason-row:last-child { border-bottom: none; }
+.reason-row .metric { display: inline-block; font-size: 12px; font-weight: 600; text-transform: capitalize; margin-bottom: 3px; }
+.reason-row .metric.ok { color: var(--ok); }
+.reason-row .metric.bad { color: var(--bad); }
+.reason-row .reason { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
 
 /* ─── TABLE ─── */
 .table-wrap { overflow-x: auto; margin-top: 8px; }
