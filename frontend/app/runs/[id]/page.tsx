@@ -30,11 +30,11 @@ export default function RunPage() {
   return (
     <main>
       <div className="hero">
-        <div className="badge"><span className="dot"></span> Shared report</div>
-        <h1>Run <span className="accent">#{params.id}</span></h1>
+        <div className="badge"><span className="dot"></span> Shared report · Run #{params.id}</div>
+        <h1><span className="accent">{run?.dataset_name ?? "…"}</span></h1>
       </div>
       {error && <div className="card" style={{ color: "var(--bad)" }}>{error}</div>}
-      {run && <Report run={run} />}
+      {run && <Report run={run} onUpdate={setRun} />}
     </main>
   );
 }

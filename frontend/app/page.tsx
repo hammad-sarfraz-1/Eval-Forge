@@ -76,7 +76,7 @@ export default function Home() {
         )}
       </div>
 
-      {run && <Report run={run} />}
+      {run && <Report run={run} onUpdate={setRun} />}
 
       <h2 className="section-title">Run history</h2>
       {pastRuns.length === 0 ? (
@@ -86,8 +86,8 @@ export default function Home() {
           {pastRuns.map((r: any) => (
             <li key={r.id}>
               <span>
-                <Link href={`/runs/${r.id}`} className="run-id">Run #{r.id}</Link>
-                <span className="meta"> · dataset {r.dataset_id} · {new Date(r.created_at).toLocaleString()}</span>
+                <Link href={`/runs/${r.id}`} className="run-id">{r.dataset_name}</Link>
+                <span className="meta"> · Run #{r.id} · {new Date(r.created_at).toLocaleString()}</span>
               </span>
               {r.status === "done"
                 ? <span className="pill done">{r.overall_score}/100</span>
