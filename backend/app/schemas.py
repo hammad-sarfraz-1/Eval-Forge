@@ -34,6 +34,7 @@ class RunListItem(BaseModel):
     """One row in the run history list — no per-metric detail."""
     id: int
     dataset_id: int
+    dataset_name: str
     overall_score: float
     status: str
     created_at: datetime
@@ -45,10 +46,12 @@ class RunListItem(BaseModel):
 class RunOut(BaseModel):
     id: int
     dataset_id: int
+    dataset_name: str
     overall_score: float
     status: str                     # running | done | error
     error: Optional[str] = None
     hallucination_rate: Optional[float]  # % of RAG rows failing faithfulness
+    rows: List[RowSummary]               # every row's summary (for grouped results)
     failed_cases: List[RowSummary]
     best_examples: List[RowSummary]
     worst_examples: List[RowSummary]

@@ -13,8 +13,8 @@ help:    ## Show available commands
 build:   ## Build the backend image
 	$(COMPOSE) build $(SERVICE)
 
-up:      ## Start the backend (Ctrl+C to stop)
-	$(COMPOSE) up $(SERVICE)
+up:      ## Start the backend + frontend (Ctrl+C to stop)
+	$(COMPOSE) up
 
 down:    ## Stop and remove the containers
 	$(COMPOSE) down
