@@ -20,7 +20,7 @@ MAX_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 1000
 # Judge calls run concurrently but bounded, so a big dataset doesn't burst the
 # provider's rate limit all at once.
-CONCURRENCY = 1
+CONCURRENCY = 4
 # One log file per run captures the whole pipeline (path, scores, retries, timings).
 LOG_DIR = "logs"
 
