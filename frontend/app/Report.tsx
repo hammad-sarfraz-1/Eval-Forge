@@ -56,12 +56,12 @@ export default function Report({ run, onUpdate }: { run: any; onUpdate?: (run: a
     return <div className="card status-line"><span className="spinner" /> Evaluating… scores appear here when the run finishes.</div>;
 
   return (
-    <>
-      <div className="card">
+    <div className="report-dash">
+      <div className="card banner">
         <div className="score">
-          <div><span className="num">{run.overall_score}</span><span className="den"> / 100</span></div>
-          <div className="label">Overall score</div>
-          {RetryButton}
+          <span className="num">{run.overall_score}</span>
+          <span className="den">/ 100</span>
+          <span className="label">Overall score</span>
         </div>
         <div className="stats">
           <div className="stat">
@@ -77,52 +77,55 @@ export default function Report({ run, onUpdate }: { run: any; onUpdate?: (run: a
             <div className="v">{new Set(run.results.map((r: any) => r.row_id)).size}</div>
           </div>
         </div>
+        {RetryButton}
       </div>
 
-      {run.failed_cases.length > 0 && (
-        <div className="card">
+      <div className="report-cols">
+        <div className="card panel">
           <h3 className="section-title" style={{ marginTop: 0 }}>Failed cases ({run.failed_cases.length})</h3>
-          <ExampleList rows={run.failed_cases} />
+          {run.failed_cases.length > 0
+            ? <ExampleList rows={run.failed_cases} />
+            : <p className="empty">No failed cases — every row passed. 🎉</p>}
         </div>
-      )}
 
-      <div className="card">
-        <h3 className="section-title" style={{ marginTop: 0 }}>Best examples</h3>
-        <ExampleList rows={run.best_examples} />
-        <h3 className="section-title">Worst examples</h3>
-        <ExampleList rows={run.worst_examples} />
-      </div>
+        <div className="card panel">
+          <h3 className="section-title" style={{ marginTop: 0 }}>Best examples</h3>
+          <ExampleList rows={run.best_examples} />
+          <h3 className="section-title">Worst examples</h3>
+          <ExampleList rows={run.worst_examples} />
+        </div>
 
-      <div className="card">
-        <h3 className="section-title" style={{ marginTop: 0 }}>All results ({run.rows.length} rows)</h3>
-        {run.rows.map((row: any) => {
-          const metrics = run.results.filter((r: any) => r.row_id === row.row_id);
-          return (
-            <details className="row-block" key={row.row_id}>
-              <summary>
-                <span className="rid">#{row.row_id}</span>
-                <span className="q">{row.question || <em>(no question)</em>}</span>
-                <span className="chips">
+        <div className="card panel">
+          <h3 className="section-title" style={{ marginTop: 0 }}>All results ({run.rows.length} rows)</h3>
+          {run.rows.map((row: any) => {
+            const metrics = run.results.filter((r: any) => r.row_id === row.row_id);
+            return (
+              <details className="row-block" key={row.row_id}>
+                <summary>
+                  <span className="rid">#{row.row_id}</span>
+                  <span className="q">{row.question || <em>(no question)</em>}</span>
+                  <span className="chips">
+                    {metrics.map((m: any) => (
+                      <span key={m.metric} className={`chip ${m.score >= 0.5 ? "ok" : "bad"}`} title={m.metric}>
+                        {m.metric.replace(/_/g, " ")} {m.score}
+                      </span>
+                    ))}
+                  </span>
+                  <span className={`verdict ${row.passed ? "ok" : "bad"}`}>{row.passed ? "PASS" : "FAIL"}</span>
+                </summary>
+                <div className="reasons">
                   {metrics.map((m: any) => (
-                    <span key={m.metric} className={`chip ${m.score >= 0.5 ? "ok" : "bad"}`} title={m.metric}>
-                      {m.metric.replace(/_/g, " ")} {m.score}
-                    </span>
+                    <div className="reason-row" key={m.metric}>
+                      <span className={`metric ${m.score >= 0.5 ? "ok" : "bad"}`}>{m.metric.replace(/_/g, " ")} · {m.score}</span>
+                      <p className="reason">{m.reason}</p>
+                    </div>
                   ))}
-                </span>
-                <span className={`verdict ${row.passed ? "ok" : "bad"}`}>{row.passed ? "PASS" : "FAIL"}</span>
-              </summary>
-              <div className="reasons">
-                {metrics.map((m: any) => (
-                  <div className="reason-row" key={m.metric}>
-                    <span className={`metric ${m.score >= 0.5 ? "ok" : "bad"}`}>{m.metric.replace(/_/g, " ")} · {m.score}</span>
-                    <p className="reason">{m.reason}</p>
-                  </div>
-                ))}
-              </div>
-            </details>
-          );
-        })}
+                </div>
+              </details>
+            );
+          })}
+        </div>
       </div>
-    </>
+    </div>
   );
 }
