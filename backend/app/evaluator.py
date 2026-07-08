@@ -71,7 +71,24 @@ _METRIC_DEFS = [
      [_P.INPUT, _P.ACTUAL_OUTPUT]),
 ]
 
-METRICS = [name for name, _, _ in _METRIC_DEFS]
+LLM_METRIC_NAMES = [name for name, _, _ in _METRIC_DEFS]
+RAG_METRIC_NAMES = ["faithfulness", "context_recall",
+                    "context_precision", "answer_relevancy"]
+
+
+def _selected(env_var, valid):
+    """Metric subset from a comma-separated env var (unset -> all). Keeps the
+    canonical order and fails loud on an unknown name so typos aren't silent."""
+    raw = os.getenv(env_var, "").strip()
+    if not raw:
+        return list(valid)
+    chosen = {m.strip() for m in raw.split(",") if m.strip()}
+    unknown = chosen - set(valid)
+    if unknown:
+        raise RuntimeError(
+            f"Unknown metric(s) in {env_var}: {sorted(unknown)}. Valid: {valid}"
+        )
+    return [m for m in valid if m in chosen]
 
 
 def _require_key():
@@ -84,12 +101,14 @@ def _require_key():
 
 def _build_llm_metrics():
     # Fresh GEval objects per call — GEval stores score/reason on itself, so
-    # sharing instances across parallel rows would corrupt results.
+    # sharing instances across parallel rows would corrupt results. Only the
+    # metrics selected via LLM_METRICS are built.
     _require_key()
+    chosen = set(_selected("LLM_METRICS", LLM_METRIC_NAMES))
     return [
         GEval(name=name, criteria=criteria,
               evaluation_params=params, model=JUDGE_MODEL)
-        for name, criteria, params in _METRIC_DEFS
+        for name, criteria, params in _METRIC_DEFS if name in chosen
     ]
 
 
@@ -100,9 +119,9 @@ def _evaluate_llm_row(row):
         expected_output=row.expected_answer or "",
     )
     out = []
-    for (name, _, _), metric in zip(_METRIC_DEFS, _build_llm_metrics()):
+    for metric in _build_llm_metrics():
         _with_backoff(metric.measure, test_case)
-        out.append((name, round(metric.score, 3), metric.reason))
+        out.append((metric.name, round(metric.score, 3), metric.reason))
     return out
 
 
@@ -125,13 +144,17 @@ def _get_rag_metrics():
                     api_key=os.getenv("OPENAI_API_KEY"),
                 )
                 llm = llm_factory(JUDGE_MODEL, provider="openai", client=client)
-                embeddings = HuggingFaceEmbeddings(model=EMBEDDING_MODEL)
-                _rag_metrics = {
-                    "faithfulness": Faithfulness(llm=llm),
-                    "context_recall": ContextRecall(llm=llm),
-                    "context_precision": ContextPrecision(llm=llm),
-                    "answer_relevancy": AnswerRelevancy(llm=llm, embeddings=embeddings),
+                # Build only selected metrics; the embedding model (used solely
+                # by answer_relevancy) loads only if that metric is chosen.
+                builders = {
+                    "faithfulness": lambda: Faithfulness(llm=llm),
+                    "context_recall": lambda: ContextRecall(llm=llm),
+                    "context_precision": lambda: ContextPrecision(llm=llm),
+                    "answer_relevancy": lambda: AnswerRelevancy(
+                        llm=llm, embeddings=HuggingFaceEmbeddings(model=EMBEDDING_MODEL)),
                 }
+                _rag_metrics = {n: builders[n]()
+                                for n in _selected("RAG_METRICS", RAG_METRIC_NAMES)}
     return _rag_metrics
 
 
